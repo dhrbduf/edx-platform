@@ -44,11 +44,20 @@ from cms.djangoapps.models.settings.course_metadata import CourseMetadata
 from common.djangoapps.course_action_state.models import CourseRerunState
 from openedx.core.djangoapps.embargo.models import CountryAccessRule, RestrictedCourse
 from openedx.core.lib.extract_tar import safetar_extractall
+from openedx.core.djangoapps.content.learning_sequences.api import replace_course_outline
+from openedx.core.djangoapps.content.learning_sequences.data import (
+    CourseOutlineData,
+    CourseSectionData,
+    CourseLearningSequenceData,
+    ExamData,
+    VisibilityData,
+    CourseVisibility
+)
 from common.djangoapps.student.auth import has_course_author_access
 from xmodule.contentstore.django import contentstore
 from xmodule.course_module import CourseFields
 from xmodule.exceptions import SerializationError
-from xmodule.modulestore import COURSE_ROOT, LIBRARY_ROOT
+from xmodule.modulestore import COURSE_ROOT, LIBRARY_ROOT, ModuleStoreEnum
 from xmodule.modulestore.django import modulestore
 from xmodule.modulestore.exceptions import DuplicateCourseError, ItemNotFoundError
 from xmodule.modulestore.xml_exporter import export_course_to_xml, export_library_to_xml
@@ -560,3 +569,99 @@ def import_olx(self, user_id, course_key_string, archive_path, archive_name, lan
                 from .views.entrance_exam import add_entrance_exam_milestone
                 add_entrance_exam_milestone(course.id, entrance_exam_chapter)
                 LOGGER.info(u'Course %s Entrance exam imported', course.id)
+
+
+def get_outline_from_modulestore(course_key):
+    """
+    Get CourseOutlineData corresponding to param:course_key
+    """
+    def _remove_version_info(usage_key):
+        """
+        When we ask modulestore for the published branch in the Studio process
+        after catching a publish signal, the items that have been changed will
+        return UsageKeys that have full version information in their attached
+        CourseKeys. This makes them hash and serialize differently. We want to
+        strip this information and have everything use a CourseKey with no
+        version information attached.
+
+        IF we can verify that this property is still true when running in an
+        out-of-process celery task, it might be a path towards optimizing our
+        publish updates to only what has changed–but that carries other risks as
+        well in terms of correctness (e.g. race conditions).
+        """
+        return usage_key.map_into_course(course_key)
+
+    def _make_section_data(section):
+        sequences_data = []
+        for sequence in section.get_children():
+            sequences_data.append(
+                CourseLearningSequenceData(
+                    usage_key=_remove_version_info(sequence.location),
+                    title=sequence.display_name,
+                    inaccessible_after_due=sequence.hide_after_due,
+                    exam=ExamData(
+                        is_practice_exam=sequence.is_practice_exam,
+                        is_proctored_enabled=sequence.is_proctored_enabled,
+                        is_time_limited=sequence.is_timed_exam
+                    ),
+                    visibility=VisibilityData(
+                        hide_from_toc=sequence.hide_from_toc,
+                        visible_to_staff_only=sequence.visible_to_staff_only
+                    ),
+                )
+            )
+
+        section_data = CourseSectionData(
+            usage_key=_remove_version_info(section.location),
+            title=section.display_name,
+            sequences=sequences_data,
+            visibility=VisibilityData(
+                hide_from_toc=section.hide_from_toc,
+                visible_to_staff_only=section.visible_to_staff_only
+            ),
+        )
+        return section_data
+
+    store = modulestore()
+    sections = []
+
+    with store.branch_setting(ModuleStoreEnum.Branch.published_only, course_key):
+        course = store.get_course(course_key, depth=2)
+        sections_data = []
+        for section in course.get_children():
+            section_data = _make_section_data(section)
+            sections_data.append(section_data)
+
+        course_outline_data = CourseOutlineData(
+            course_key=course_key,
+            title=course.display_name,
+            published_at=course.subtree_edited_on,
+            published_version=str(course.course_version),  # .course_version is a BSON obj
+            entrance_exam_id=course.entrance_exam_id,
+            days_early_for_beta=course.days_early_for_beta,
+            sections=sections_data,
+            self_paced=course.self_paced,
+            course_visibility=CourseVisibility(course.course_visibility),
+        )
+    return course_outline_data
+
+
+def update_outline_from_modulestore(course_key):
+    """
+    Update the CourseOutlineData for course_key with ModuleStore data (i.e. what
+    was most recently published in Studio).
+    """
+    course_outline_data = get_outline_from_modulestore(course_key)
+    import prettyprinter
+    #prettyprinter.install_extras()
+    #prettyprinter.cpprint(course_outline_data)
+    replace_course_outline(course_outline_data)
+
+
+@task(name='contentstore.update_outline_from_modulestore_task')
+def update_outline_from_modulestore_task(course_key_str):
+    try:
+        course_key = CourseKey.from_string(course_key_str)
+        update_outline_from_modulestore(course_key)
+    except Exception as err:
+        LOGGER.exception(f"Could not create course outline for course {course_key_str}")
