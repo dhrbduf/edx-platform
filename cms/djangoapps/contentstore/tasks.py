@@ -652,9 +652,6 @@ def update_outline_from_modulestore(course_key):
     was most recently published in Studio).
     """
     course_outline_data = get_outline_from_modulestore(course_key)
-    import prettyprinter
-    #prettyprinter.install_extras()
-    #prettyprinter.cpprint(course_outline_data)
     replace_course_outline(course_outline_data)
 
 
