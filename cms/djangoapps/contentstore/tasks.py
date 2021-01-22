@@ -573,7 +573,7 @@ def import_olx(self, user_id, course_key_string, archive_path, archive_name, lan
 
 def get_outline_from_modulestore(course_key):
     """
-    Get CourseOutlineData corresponding to param:course_key
+    Get a learning_sequence CourseOutlineData corresponding to param:course_key
     """
     def _remove_version_info(usage_key):
         """
@@ -623,7 +623,6 @@ def get_outline_from_modulestore(course_key):
         return section_data
 
     store = modulestore()
-    sections = []
 
     with store.branch_setting(ModuleStoreEnum.Branch.published_only, course_key):
         course = store.get_course(course_key, depth=2)
@@ -648,8 +647,8 @@ def get_outline_from_modulestore(course_key):
 
 def update_outline_from_modulestore(course_key):
     """
-    Update the CourseOutlineData for course_key with ModuleStore data (i.e. what
-    was most recently published in Studio).
+    Update the CourseOutlineData for course_key in the learning_sequences with
+    ModuleStore data (i.e. what was most recently published in Studio).
     """
     course_outline_data = get_outline_from_modulestore(course_key)
     replace_course_outline(course_outline_data)
@@ -657,8 +656,12 @@ def update_outline_from_modulestore(course_key):
 
 @task(name='contentstore.update_outline_from_modulestore_task')
 def update_outline_from_modulestore_task(course_key_str):
+    """
+    Celery task that creates a learning_sequence
+    """
     try:
         course_key = CourseKey.from_string(course_key_str)
         update_outline_from_modulestore(course_key)
-    except Exception as err:
-        LOGGER.exception(f"Could not create course outline for course {course_key_str}")
+    except Exception:  # pylint disable=broad-except
+        LOGGER.exception("Could not create course outline for course %s", course_key_str)
+        raise  # Re-raise so that errors are noted in reporting.
