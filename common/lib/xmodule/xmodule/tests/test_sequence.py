@@ -142,12 +142,13 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         seq_module = SequenceModule(runtime=Mock(position=2), descriptor=Mock(), scope_ids=Mock())
         self.assertEqual(seq_module.position, 2)  # matches position set in the runtime
 
+    @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
     @ddt.unpack
     @ddt.data(
         {'view': STUDENT_VIEW},
         {'view': PUBLIC_VIEW},
     )
-    def test_render_student_view(self, view):
+    def test_render_student_view(self, mocked_user, view):  # pylint: disable=unused-argument
         html = self._get_rendered_view(
             self.sequence_3_1,
             extra_context=dict(next_url='NextSequential', prev_url='PrevSequential'),
@@ -160,8 +161,10 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         self.assertIn("'prev_url': 'PrevSequential'", html)
         self.assertNotIn("fa fa-check-circle check-circle is-hidden", html)
 
+    # pylint: disable=line-too-long
     @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
-    def test_timed_exam_gating_waffle_flag(self, mocked_user):
+    @patch('xmodule.seq_module.SequenceModule.gate_entire_sequence_if_it_is_a_timed_exam_and_contains_content_type_gated_problems')
+    def test_timed_exam_gating_waffle_flag(self, mocked_function, mocked_user):  # pylint: disable=unused-argument
         """
         Verify the code inside the waffle flag is not executed with the flag off
         Verify the code inside the waffle flag is executed with the flag on
@@ -174,7 +177,7 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
                 extra_context=dict(next_url='NextSequential', prev_url='PrevSequential'),
                 view=STUDENT_VIEW
             )
-            mocked_user.assert_not_called()
+            mocked_function.assert_not_called()
 
         with override_waffle_flag(TIMED_EXAM_GATING_WAFFLE_FLAG, active=True):
             self._get_rendered_view(
@@ -182,7 +185,7 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
                 extra_context=dict(next_url='NextSequential', prev_url='PrevSequential'),
                 view=STUDENT_VIEW
             )
-            mocked_user.assert_called_once()
+            mocked_function.assert_called_once()
 
     @override_waffle_flag(TIMED_EXAM_GATING_WAFFLE_FLAG, active=True)
     @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
@@ -243,27 +246,30 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         self.assertIn('NextSequential', view)
         self.assertIn('PrevSequential', view)
 
+    @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
     @ddt.unpack
     @ddt.data(
         {'view': STUDENT_VIEW},
         {'view': PUBLIC_VIEW},
     )
-    def test_student_view_first_child(self, view):
+    def test_student_view_first_child(self, mocked_user, view):  # pylint: disable=unused-argument
         html = self._get_rendered_view(
             self.sequence_3_1, requested_child='first', view=view
         )
         self._assert_view_at_position(html, expected_position=1)
 
+    @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
     @ddt.unpack
     @ddt.data(
         {'view': STUDENT_VIEW},
         {'view': PUBLIC_VIEW},
     )
-    def test_student_view_last_child(self, view):
+    def test_student_view_last_child(self, mocked_user, view):  # pylint: disable=unused-argument
         html = self._get_rendered_view(self.sequence_3_1, requested_child='last', view=view)
         self._assert_view_at_position(html, expected_position=3)
 
-    def test_tooltip(self):
+    @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
+    def test_tooltip(self, mocked_user):  # pylint: disable=unused-argument
         html = self._get_rendered_view(self.sequence_3_1, requested_child=None)
         for child in self.sequence_3_1.children:
             self.assertIn("'page_title': '{}'".format(child.block_id), html)
@@ -437,7 +443,8 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         )
         self.assertIs(completion_return, None)
 
-    def test_handle_ajax_metadata(self):
+    @patch('xmodule.seq_module.SequenceModule._get_user', return_value=UserFactory.build())
+    def test_handle_ajax_metadata(self, mocked_user):  # pylint: disable=unused-argument
         """
         Test that the sequence metadata is returned from the
         metadata ajax handler.
