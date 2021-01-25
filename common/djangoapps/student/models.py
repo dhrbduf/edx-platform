@@ -63,6 +63,7 @@ from lms.djangoapps.courseware.models import (
     DynamicUpgradeDeadlineConfiguration,
     OrgDynamicUpgradeDeadlineConfiguration
 )
+from lms.djangoapps.courseware.toggles import COURSEWARE_PROCTORING_IMPROVEMENTS
 from lms.djangoapps.verify_student.models import SoftwareSecurePhotoVerification
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.djangoapps.enrollments.api import (
@@ -70,6 +71,7 @@ from openedx.core.djangoapps.enrollments.api import (
     get_enrollment_attributes,
     set_enrollment_attributes
 )
+from openedx.core.djangoapps.enrollments.emails import send_proctoring_requirements_email
 from openedx.core.djangoapps.signals.signals import USER_ACCOUNT_ACTIVATED
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangoapps.xmodule_django.models import NoneToEmptyManager
@@ -1194,6 +1196,16 @@ class CourseEnrollment(models.Model):
 
     objects = CourseEnrollmentManager()
 
+    @property
+    def has_proctoring_requirements(self):
+        if not settings.FEATURES.get('ENABLE_SPECIAL_EXAMS'):
+            return False
+        if self.mode not in CourseMode.CERTIFICATE_RELEVANT_MODES:
+            return False
+        if not self.course.enable_proctored_exams:
+            return False
+        return True
+
     # cache key format e.g enrollment.<username>.<course_key>.mode = 'honor'
     COURSE_ENROLLMENT_CACHE_KEY = u"enrollment.{}.{}.mode"  # TODO Can this be removed?  It doesn't seem to be used.
 
@@ -1361,6 +1373,14 @@ class CourseEnrollment(models.Model):
                 self.send_signal(EnrollStatusChange.unenroll)
 
         if mode_changed:
+            if COURSEWARE_PROCTORING_IMPROVEMENTS.is_enabled(self.course_id) and self.has_proctoring_requirements:
+                # If mode changed to one that requires proctoring, send proctoring requirements email
+                email_context = {'user'=self.user, 'course_name'=self.course.display_name,
+                                 'proctoring_provider': self.course.proctoring_provider,
+                                 'proctoring_requirements_url': ('https://support.edx.org/hc/en-us/articles/'
+                                                                 '207249428-How-do-proctored-exams-work-')}
+                send_proctoring_requirements_email(context=email_context)
+
             # Only emit mode change events when the user's enrollment
             # mode has changed from its previous setting
             self.emit_event(EVENT_NAME_ENROLLMENT_MODE_CHANGED)
