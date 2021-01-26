@@ -15,10 +15,10 @@ from xmodule.modulestore.django import modulestore
 
 from common.djangoapps.student.models import CourseEnrollment, UserProfile
 from lms.djangoapps.certificates.allowlist import can_generate_allowlist_certificate
-from lms.djangoapps.certificates.api import emit_certificate_event
 from lms.djangoapps.certificates.models import CertificateStatuses, GeneratedCertificate
 from lms.djangoapps.certificates.signals import CERTIFICATE_DELAY_SECONDS
 from lms.djangoapps.certificates.tasks import generate_certificate
+from lms.djangoapps.certificates.utils import emit_certificate_event
 from lms.djangoapps.grades.api import CourseGradeFactory
 
 log = logging.getLogger(__name__)
